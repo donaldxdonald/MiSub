@@ -105,7 +105,7 @@ function parseAclRuleSetLine(line, { isChinaClient = false } = {}) {
     };
 }
 
-function parseAclProxyGroupLine(line) {
+function parseAclProxyGroupLine(line, { targetFormat = 'clash' } = {}) {
     const raw = line.replace(/^custom_proxy_group=/i, '');
     const parts = raw
         .split('`')
@@ -120,6 +120,21 @@ function parseAclProxyGroupLine(line) {
     const options = {};
 
     for (const part of parts.slice(2)) {
+        if (/^!!PROVIDER=/i.test(part)) {
+            if (targetFormat === 'clash') {
+                options.use = Array.from(
+                    new Set([
+                        ...(options.use || []),
+                        ...part
+                            .slice('!!PROVIDER='.length)
+                            .split(',')
+                            .map((name) => name.trim())
+                            .filter(Boolean),
+                    ])
+                );
+            }
+            continue;
+        }
         if (part.startsWith('[]')) {
             members.push(part.slice(2));
             continue;
@@ -181,9 +196,15 @@ function parseChainProxyLine(line) {
 export function parseIniTemplate(templateText, options = {}) {
     const sections = parseIniSections(templateText);
     const aclCustomLines = sections.get('custom') || [];
+    const clashRuleBase = aclCustomLines
+        .map((line) => line.trim())
+        .filter((line) => /^clash_rule_base\s*=/i.test(line))
+        .at(-1)
+        ?.replace(/^clash_rule_base\s*=/i, '')
+        .trim();
     const parsedAclGroups = aclCustomLines
         .filter((line) => /^custom_proxy_group=/i.test(line.trim()))
-        .map(parseAclProxyGroupLine)
+        .map((line) => parseAclProxyGroupLine(line, options))
         .filter(Boolean);
     const parsedAclRules = aclCustomLines
         .filter((line) => /^ruleset=/i.test(line.trim()))
@@ -224,6 +245,10 @@ export function parseIniTemplate(templateText, options = {}) {
             customDnsOverride: options.customDnsOverride || '',
             dnsMode: options.dnsMode || 'clean',
         },
-        extras: parsedChainProxy.length > 0 ? { chainProxy: parsedChainProxy } : {},
+        extras: {
+            ...(parsedChainProxy.length > 0 ? { chainProxy: parsedChainProxy } : {}),
+            ...(clashRuleBase ? { clashRuleBase } : {}),
+            ...(options.clashBaseConfig ? { clashBaseConfig: options.clashBaseConfig } : {}),
+        },
     });
 }

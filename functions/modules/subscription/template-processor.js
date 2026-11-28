@@ -48,7 +48,11 @@ function pruneEmptyGroups(model) {
         changed = false;
         const emptyGroupNames = new Set(
             model.groups
-                .filter((g) => !Array.isArray(g.members) || g.members.length === 0)
+                .filter(
+                    (g) =>
+                        (!Array.isArray(g.members) || g.members.length === 0) &&
+                        !g.options?.use?.length
+                )
                 .map((g) => g.name)
         );
 
@@ -394,7 +398,7 @@ export function applySmartModelOptimizations(model) {
         if (mainGroupCandidates.length > 0) {
             const targetGroup = mainGroupCandidates[0];
             // 如果该组还没有任何成员，注入所有可用的组
-            if (targetGroup.members.length === 0) {
+            if (targetGroup.members.length === 0 && !targetGroup.options?.use?.length) {
                 const availableGroups = model.groups
                     .filter(
                         (g) =>

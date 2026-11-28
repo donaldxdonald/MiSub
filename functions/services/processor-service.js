@@ -21,6 +21,7 @@ import yaml from 'js-yaml';
 import { urlsToClashProxies } from '../utils/url-to-clash.js';
 import { resolveSafeDnsConfig } from '../modules/subscription/safe-dns.js';
 import { applyMihomoChainProxyToClashConfig } from '../modules/subscription/mihomo-chain-proxy.js';
+import { parseIniTemplate } from '../modules/subscription/template-parsers/ini-template-parser.js';
 
 function getTemplateExtension(templateUrl) {
     const raw = typeof templateUrl === 'string' ? templateUrl.trim() : '';
@@ -272,10 +273,28 @@ export class ProcessorService {
                 };
 
                 switch (targetFormat) {
-                    case 'clash':
+                    case 'clash': {
+                        const baseReference = parseIniTemplate(templateText).extras.clashRuleBase;
+                        if (baseReference) {
+                            const baseUrl = new URL(baseReference, remoteTemplateUrl || undefined);
+                            const baseText = await fetchTransformTemplate(
+                                storageAdapter,
+                                baseUrl.toString()
+                            );
+                            const baseConfig = yaml.load(baseText);
+                            if (
+                                !baseConfig ||
+                                typeof baseConfig !== 'object' ||
+                                Array.isArray(baseConfig)
+                            ) {
+                                throw new Error('Clash base template must be a YAML mapping');
+                            }
+                            renderParams.clashBaseConfig = baseConfig;
+                        }
                         finalContent = renderClashFromIniTemplate(templateText, renderParams);
                         contentType = 'application/x-yaml; charset=utf-8';
                         break;
+                    }
                     case 'singbox':
                     case 'sing-box':
                         finalContent = renderSingboxFromIniTemplate(templateText, renderParams);

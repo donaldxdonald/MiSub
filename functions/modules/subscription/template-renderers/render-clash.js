@@ -73,6 +73,7 @@ const ACL4SSR_ROOT_LIST_ONLY_FILES = new Set([
     'chinadomain',
     'download',
     'unban',
+    'googlecn',
 ]);
 
 function toClashRuleProviderUrl(sourceUrl) {
@@ -168,14 +169,16 @@ function getRuleProviderBehavior(providerUrl) {
 
 function mapRule(rule, ruleProviderMap) {
     const type = String(rule.type || '').toUpperCase();
+    const extras =
+        Array.isArray(rule.extras) && rule.extras.length > 0 ? `,${rule.extras.join(',')}` : '';
     if (!type) return null;
     if (type === 'MATCH' || type === 'FINAL') return `MATCH,${rule.policy}`;
-    if (type === 'GEOIP') return `GEOIP,${rule.value || 'CN'},${rule.policy}`;
+    if (type === 'GEOIP') return `GEOIP,${rule.value || 'CN'},${rule.policy}${extras}`;
     if (type === 'RULE-SET') {
         const providerName = ruleProviderMap.get(rule.value);
-        return `RULE-SET,${providerName || rule.value},${rule.policy}`;
+        return `RULE-SET,${providerName || rule.value},${rule.policy}${extras}`;
     }
-    return `${type},${rule.value},${rule.policy}`;
+    return `${type},${rule.value},${rule.policy}${extras}`;
 }
 
 export function renderClashFromTemplateModel(model, options = {}) {
@@ -189,7 +192,15 @@ export function renderClashFromTemplateModel(model, options = {}) {
         });
     }
 
-    const ruleProviders = {};
+    const baseConfig = normalizedModel.extras.clashBaseConfig || {};
+    const ruleProviders = { ...baseConfig['rule-providers'] };
+    for (const group of normalizedModel.groups) {
+        for (const provider of group.options?.use || []) {
+            if (!Object.hasOwn(baseConfig['proxy-providers'] || {}, provider)) {
+                throw new Error(`Unknown Clash proxy provider: ${provider}`);
+            }
+        }
+    }
     const ruleProviderMap = new Map();
     let providerCounter = 0;
 
@@ -216,7 +227,10 @@ export function renderClashFromTemplateModel(model, options = {}) {
             // ignore invalid provider url shapes and keep fallback name
         }
 
-        const providerName = `${nameHint}_${providerCounter++}`;
+        let providerName;
+        do {
+            providerName = `${nameHint}_${providerCounter++}`;
+        } while (Object.hasOwn(ruleProviders, providerName));
         ruleProviderMap.set(providerUrl, providerName);
         const usesTextList = /\.(list|txt)$/i.test(providerUrl);
         const usesMrs = isMrsProviderUrl(providerUrl);
@@ -243,7 +257,8 @@ export function renderClashFromTemplateModel(model, options = {}) {
         'geox-url': { ...GEOX_URLS },
         // 域名嗅探：还原硬编码 IP 直连流量的真实域名，命中模板中的域名分流规则
         sniffer: { ...DEFAULT_SNIFFER_CONFIG },
-        dns: resolveSafeDnsConfig(normalizedModel.settings?.customDnsOverride, {
+        ...baseConfig,
+        dns: resolveSafeDnsConfig(normalizedModel.settings?.customDnsOverride || baseConfig.dns, {
             mode: normalizedModel.settings?.dnsMode,
             proxyGroup: DNS_PROXY_GROUP,
         }),
@@ -252,7 +267,8 @@ export function renderClashFromTemplateModel(model, options = {}) {
             .filter(
                 (group) =>
                     (Array.isArray(group.members) && group.members.length > 0) ||
-                    (Array.isArray(group.filters) && group.filters.length > 0)
+                    (Array.isArray(group.filters) && group.filters.length > 0) ||
+                    group.options?.use?.length > 0
             )
             .map((group) => {
                 return {
@@ -280,6 +296,7 @@ export function renderClashFromTemplateModel(model, options = {}) {
             .filter(Boolean),
         profile: {
             'store-selected': true,
+            ...baseConfig.profile,
             'subscription-url': normalizedModel.settings.managedConfigUrl || '',
         },
     };
